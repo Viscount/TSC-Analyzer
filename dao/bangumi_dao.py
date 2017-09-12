@@ -19,6 +19,19 @@ def add_bangumi(bangumi):
         DBUtil.close_session(session)
 
 
+def find_all_bangumis():
+    session = DBUtil.open_session()
+    try:
+        result = session.query(Bangumi).all()
+        return result
+    except Exception as e:
+        print e
+        session.rollback()
+        return None
+    finally:
+        DBUtil.close_session(session)
+
+
 def find_bangumi_by_id(season_id):
     session = DBUtil.open_session()
     try:
