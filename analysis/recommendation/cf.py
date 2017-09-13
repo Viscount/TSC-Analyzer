@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 
 import csv
-from dao import bangumi_dao
+from dao import bangumi_dao, episode_dao, danmaku_dao
+import numpy as np
 
 
 def get_senders(path, limit):
@@ -34,18 +35,35 @@ def make_lookup(item_set):
     for item in item_set:
         id_item_lookup[str(index)] = item
         item_id_lookup[item] = str(index)
+        index += 1
     return id_item_lookup, item_id_lookup
 
 
-def get_sender_bangumi():
-    pass
+def get_sender_bangumi(sender_id):
+    danmakus = danmaku_dao.find_danmakus_by_sender_id(sender_id)
+    episode_id_set = set()
+    for danmaku in danmakus:
+        episode_id_set.add(danmaku.episode_id)
+    episodes = episode_dao.find_episodes_by_ids(list(episode_id_set))
+    bangumis_set = set()
+    for episode in episodes:
+        bangumis_set.add(episode.season_id)
+    return bangumis_set
 
 
 if __name__ == "__main__":
-    senders = get_senders("D:\\workspace\\TSC-Analyzer\\tmp\\senders.csv", 100)
+    senders = get_senders("D:\\workspace\\TSC-Analyzer\\tmp\\senders.csv", 500)
     bangumis = get_bangumis()
     id_user_lookup, user_id_lookup = make_lookup(senders)
     id_bangumi_lookup, bangumi_id_lookup = make_lookup(bangumis)
-    
+    matrix = np.zeros((len(senders), len(bangumis)))
+    for sender in senders:
+        sender_index = int(user_id_lookup[sender])
+        bangumis_set = get_sender_bangumi(sender)
+        for bangumi in bangumis_set:
+            bangumi_index = int(bangumi_id_lookup[bangumi])
+            matrix[sender_index][bangumi_index] = 1
+    np.savetxt("matrix.txt", matrix, fmt="%d", delimiter=",")
+
 
 
