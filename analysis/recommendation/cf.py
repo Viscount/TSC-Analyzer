@@ -4,6 +4,8 @@
 import csv
 from dao import bangumi_dao, episode_dao, danmaku_dao
 import numpy as np
+import pandas as pd
+from numpy import linalg
 
 
 def get_senders(path, limit):
@@ -51,19 +53,73 @@ def get_sender_bangumi(sender_id):
     return bangumis_set
 
 
+def sim(a, b):
+    num = np.dot(a, b)  # 若为行向量则 A * B.T
+    denom = linalg.norm(a) * linalg.norm(b)
+    cos = num / denom  # 余弦值
+    return cos
+
+
+def evaluate(standard, predict):
+    dim = standard.shape[0]
+    std_rank = np.argsort(-standard)
+    predict_rank = np.argsort(-predict)
+    std_result_set = set()
+    predict_set = set()
+    for index in range(0, dim):
+        if standard[std_rank[index]] == 0:
+            break
+        else:
+            std_result_set.add(std_rank[index])
+            predict_set.add(predict_rank[index])
+    return len(std_result_set & predict_set) * 1.0 / index
+
+
 if __name__ == "__main__":
-    senders = get_senders("D:\\workspace\\TSC-Analyzer\\tmp\\senders.csv", 500)
-    bangumis = get_bangumis()
-    id_user_lookup, user_id_lookup = make_lookup(senders)
-    id_bangumi_lookup, bangumi_id_lookup = make_lookup(bangumis)
-    matrix = np.zeros((len(senders), len(bangumis)))
-    for sender in senders:
-        sender_index = int(user_id_lookup[sender])
-        bangumis_set = get_sender_bangumi(sender)
-        for bangumi in bangumis_set:
-            bangumi_index = int(bangumi_id_lookup[bangumi])
-            matrix[sender_index][bangumi_index] = 1
-    np.savetxt("matrix.txt", matrix, fmt="%d", delimiter=",")
+    # senders = get_senders("D:\\workspace\\TSC-Analyzer\\tmp\\senders.csv", 500)
+    # bangumis = get_bangumis()
+    # id_user_lookup, user_id_lookup = make_lookup(senders)
+    # id_bangumi_lookup, bangumi_id_lookup = make_lookup(bangumis)
+    # matrix = np.zeros((len(senders), len(bangumis)))
+    # for sender in senders:
+    #     sender_index = int(user_id_lookup[sender])
+    #     bangumis_set = get_sender_bangumi(sender)
+    #     for bangumi in bangumis_set:
+    #         bangumi_index = int(bangumi_id_lookup[bangumi])
+    #         matrix[sender_index][bangumi_index] = 1
+    # np.savetxt("matrix.txt", matrix, fmt="%d", delimiter=",")
+
+    matrix = np.loadtxt("matrix.txt", delimiter=",")
+    sender_count = matrix.shape[0]
+    bangumi_count = matrix.shape[1]
+    # user-based cf
+    result_list = []
+    for sender_index in range(0, sender_count):
+        standard = matrix[sender_index, :]
+        score = np.zeros(bangumi_count)
+        # 获取相邻用户
+        compare_user_set = set()
+        for bangumi_index in range(0, bangumi_count):
+            if standard[bangumi_index] == 1:
+                bangumi_watched = matrix[:, bangumi_index]
+                for user_index in range(0, sender_count):
+                    if bangumi_watched[user_index] == 1 & user_index != sender_index:
+                        compare_user_set.add(user_index)
+        # 计算推荐值
+        for user_index in compare_user_set:
+            user_array = matrix[user_index, :]
+            similarity = sim(standard, user_array)
+            for index in range(0, bangumi_count):
+                score[index] += user_array[index] * similarity
+        # 计算评估结果
+        evl = evaluate(standard, score)
+        print evl
+        result_list.append(evl)
+    overall = pd.Series(result_list)
+    print "Total: %f" % (overall.mean())
+
+
+
 
 
 
