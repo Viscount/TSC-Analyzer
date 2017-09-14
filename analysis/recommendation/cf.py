@@ -5,6 +5,8 @@ import csv
 from dao import bangumi_dao, episode_dao, danmaku_dao
 import numpy as np
 import pandas as pd
+import math
+import random
 from numpy import linalg
 
 
@@ -60,7 +62,41 @@ def sim(a, b):
     return cos
 
 
-def evaluate(standard, predict):
+def item_sim(a, b):
+    dim = a.shape[0]
+    a_rank = np.argsort(-a)
+    b_rank = np.argsort(-b)
+    a_user_set = set()
+    b_user_set = set()
+    for index in range(0, dim):
+        if a[a_rank[index]] > 0:
+            a_user_set.add(a_rank[index])
+        if b[b_rank[index]] > 0:
+            b_user_set.add(b_rank[index])
+        if a[a_rank[index]] == 0 and b[b_rank[index]] == 0:
+            break
+    if len(a_user_set) == 0 or len(b_user_set) == 0:
+        return 0
+    sim = len(a_user_set & b_user_set) * 1.0/math.sqrt(len(a_user_set)*len(b_user_set))
+    return sim
+
+
+def split_watched(watched, ratio):
+    rank = np.argsort(-watched)
+    watched_set = set()
+    for index in range(0, watched.shape[0]):
+        if watched[rank[index]] > 0:
+            watched_set.add(rank[index])
+        else:
+            break
+    select_num = int(index * ratio)
+    test_num = index - select_num
+    select_set = set(random.sample(list(watched_set), select_num))
+    test_set = watched_set - select_set
+    return select_set, test_set
+
+
+def evaluate_user_based(standard, predict):
     dim = standard.shape[0]
     std_rank = np.argsort(-standard)
     predict_rank = np.argsort(-predict)
@@ -73,6 +109,17 @@ def evaluate(standard, predict):
             std_result_set.add(std_rank[index])
             predict_set.add(predict_rank[index])
     return len(std_result_set & predict_set) * 1.0 / index
+
+
+def evaluate_item_based(train_set, test_set, score):
+    rank = np.argsort(-score)
+    recommend_set = set()
+    index = 0
+    while len(recommend_set) < len(test_set)+len(train_set):
+        if score[rank[index]] not in train_set:
+            recommend_set.add(rank[index])
+            index += 1
+    return len(test_set & recommend_set) * 1.0 / len(test_set)
 
 
 if __name__ == "__main__":
@@ -93,26 +140,53 @@ if __name__ == "__main__":
     sender_count = matrix.shape[0]
     bangumi_count = matrix.shape[1]
     # user-based cf
+    # result_list = []
+    # for sender_index in range(0, sender_count):
+    #     standard = matrix[sender_index, :]
+    #     score = np.zeros(bangumi_count)
+    #     # 获取相邻用户
+    #     compare_user_set = set()
+    #     for bangumi_index in range(0, bangumi_count):
+    #         if standard[bangumi_index] == 1:
+    #             bangumi_watched = matrix[:, bangumi_index]
+    #             for user_index in range(0, sender_count):
+    #                 if bangumi_watched[user_index] == 1 & user_index != sender_index:
+    #                     compare_user_set.add(user_index)
+    #     # 计算推荐值
+    #     for user_index in compare_user_set:
+    #         user_array = matrix[user_index, :]
+    #         similarity = sim(standard, user_array)
+    #         for index in range(0, bangumi_count):
+    #             score[index] += user_array[index] * similarity
+    #     # 计算评估结果
+    #     evl = evaluate_user_based(standard, score)
+    #     print evl
+    #     result_list.append(evl)
+    # overall = pd.Series(result_list)
+    # print "Total: %f" % (overall.mean())
+
+    # item-based cf
+    sim_bangumi = np.zeros((bangumi_count, bangumi_count))
     result_list = []
-    for sender_index in range(0, sender_count):
-        standard = matrix[sender_index, :]
+    for index in range(0, bangumi_count):
+        for index_com in range(index, bangumi_count):
+            if index == index_com:
+                sim_bangumi[index, index_com] = 1.0
+            else:
+                similarity = item_sim(matrix[:, index], matrix[:, index_com])
+                sim_bangumi[index, index_com] = similarity
+                sim_bangumi[index_com, index] = similarity
+    ratio = 0.6
+    for index in range(0, sender_count):
+        bangumi_watch = matrix[index, :]
         score = np.zeros(bangumi_count)
-        # 获取相邻用户
-        compare_user_set = set()
-        for bangumi_index in range(0, bangumi_count):
-            if standard[bangumi_index] == 1:
-                bangumi_watched = matrix[:, bangumi_index]
-                for user_index in range(0, sender_count):
-                    if bangumi_watched[user_index] == 1 & user_index != sender_index:
-                        compare_user_set.add(user_index)
-        # 计算推荐值
-        for user_index in compare_user_set:
-            user_array = matrix[user_index, :]
-            similarity = sim(standard, user_array)
-            for index in range(0, bangumi_count):
-                score[index] += user_array[index] * similarity
-        # 计算评估结果
-        evl = evaluate(standard, score)
+        train_set, test_set = split_watched(bangumi_watch, ratio)
+        if len(train_set) == 0 or len(test_set) == 0:
+            continue
+        for train_item in train_set:
+            for bangumi_id in range(0, bangumi_count):
+                score[bangumi_id] += sim_bangumi[train_item, bangumi_id]
+        evl = evaluate_item_based(train_set, test_set, score)
         print evl
         result_list.append(evl)
     overall = pd.Series(result_list)
