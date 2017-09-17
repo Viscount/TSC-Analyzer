@@ -2,3 +2,5 @@ sqlalchemy
 mysql-connector-python-rf
 numpy
 pandas
+gensim
+jieba
