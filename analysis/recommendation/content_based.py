@@ -5,9 +5,17 @@ import csv
 from dao import bangumi_dao, episode_dao, danmaku_dao
 import numpy as np
 import pandas as pd
-import math
 import random
-from numpy import linalg
+from gensim.models.doc2vec import TaggedDocument, Doc2Vec
+import multiprocessing
+from util import preprocess_util
+import logging
+from sklearn.naive_bayes import GaussianNB
+from sklearn import svm
+from sklearn.metrics import precision_score, recall_score
+
+logger = logging.getLogger("logger")
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 
 
 def get_senders(path, limit):
@@ -55,109 +63,85 @@ def get_sender_bangumi(sender_id):
     return bangumis_set
 
 
-def sim(a, b):
-    num = np.dot(a, b)  # 若为行向量则 A * B.T
-    denom = linalg.norm(a) * linalg.norm(b)
-    cos = num / denom  # 余弦值
-    return cos
+class TscTaggedDocument(object):
+    def __init__(self, bangumis):
+        self.bangumis = bangumis
+
+    def __iter__(self):
+        for bangumi in self.bangumis:
+            intro_words = preprocess_util.word_segment(bangumi.introduction)
+            yield TaggedDocument(words=intro_words, tags=[str(bangumi.season_id)])
 
 
-def item_sim(a, b):
-    dim = a.shape[0]
-    a_rank = np.argsort(-a)
-    b_rank = np.argsort(-b)
-    a_user_set = set()
-    b_user_set = set()
-    for index in range(0, dim):
-        if a[a_rank[index]] > 0:
-            a_user_set.add(a_rank[index])
-        if b[b_rank[index]] > 0:
-            b_user_set.add(b_rank[index])
-        if a[a_rank[index]] == 0 and b[b_rank[index]] == 0:
-            break
-    if len(a_user_set) == 0 or len(b_user_set) == 0:
-        return 0
-    sim = len(a_user_set & b_user_set) * 1.0/math.sqrt(len(a_user_set)*len(b_user_set))
-    return sim
+def model_training():
+    bangumis = bangumi_dao.find_all_bangumis()
+    tsc_docs = TscTaggedDocument(bangumis)
+    model = Doc2Vec(dm=0, dbow_words=1, size=200, window=8, min_count=1, iter=10, workers=multiprocessing.cpu_count())
+    print 'Building vocabulary......'
+    model.build_vocab(tsc_docs)
+    print 'Training doc2vec model......'
+    model.train(tsc_docs, total_examples=model.corpus_count, epochs=model.iter)
+    print 'Vocabulary size:', len(model.wv.vocab)
+    model.save("intro_doc2vec_200.model")
 
 
-def split_watched(watched, ratio):
-    rank = np.argsort(-watched)
+def split_dataset(watched_vector, ratio):
     watched_set = set()
-    for index in range(0, watched.shape[0]):
-        if watched[rank[index]] > 0:
-            watched_set.add(rank[index])
+    unwatched_set = set()
+    for index in range(0, watched_vector.shape[0]):
+        if watched_vector[index] > 0:
+            watched_set.add(index)
         else:
-            break
-    select_num = int(index * ratio)
-    test_num = index - select_num
-    select_set = set(random.sample(list(watched_set), select_num))
-    test_set = watched_set - select_set
-    return select_set, test_set
-
-
-def evaluate_user_based(standard, predict):
-    dim = standard.shape[0]
-    std_rank = np.argsort(-standard)
-    predict_rank = np.argsort(-predict)
-    std_result_set = set()
-    predict_set = set()
-    for index in range(0, dim):
-        if standard[std_rank[index]] == 0:
-            break
-        else:
-            std_result_set.add(std_rank[index])
-            predict_set.add(predict_rank[index])
-    return len(std_result_set & predict_set) * 1.0 / index
-
-
-def evaluate_item_based(train_set, test_set, score):
-    rank = np.argsort(-score)
-    recommend_set = set()
-    index = 0
-    while len(recommend_set) < len(test_set)+len(train_set):
-        if score[rank[index]] not in train_set:
-            recommend_set.add(rank[index])
-            index += 1
-    return len(test_set & recommend_set) * 1.0 / len(test_set)
+            unwatched_set.add(index)
+    total_select_num = int(watched_vector.shape[0] * ratio)
+    watched_select_num = int(len(watched_set) * ratio)
+    if watched_select_num == len(watched_set) or watched_select_num == 0:
+        return None, None
+    watched_select = set(random.sample(list(watched_set), watched_select_num))
+    unwatched_select = set(random.sample(list(unwatched_set), total_select_num - watched_select_num))
+    train_set = watched_select | unwatched_select
+    test_set = (watched_set - watched_select) | (unwatched_set - unwatched_select)
+    return train_set, test_set
 
 
 if __name__ == "__main__":
+    # model_training()
+
     senders = get_senders("D:\\workspace\\TSC-Analyzer\\tmp\\senders.csv", 500)
     bangumis = get_bangumis()
     id_user_lookup, user_id_lookup = make_lookup(senders)
     id_bangumi_lookup, bangumi_id_lookup = make_lookup(bangumis)
 
-    for bangumi in bangumis:
-        pass
     matrix = np.loadtxt("matrix.txt", delimiter=",")
     sender_count = matrix.shape[0]
     bangumi_count = matrix.shape[1]
+    model = Doc2Vec.load("intro_doc2vec_200.model")
 
-    # item-based cf
-    sim_bangumi = np.zeros((bangumi_count, bangumi_count))
-    result_list = []
-    for index in range(0, bangumi_count):
-        for index_com in range(index, bangumi_count):
-            if index == index_com:
-                sim_bangumi[index, index_com] = 1.0
-            else:
-                similarity = item_sim(matrix[:, index], matrix[:, index_com])
-                sim_bangumi[index, index_com] = similarity
-                sim_bangumi[index_com, index] = similarity
+    # content-based
     ratio = 0.8
+    result_list = []
     for index in range(0, sender_count):
         bangumi_watch = matrix[index, :]
         score = np.zeros(bangumi_count)
-        train_set, test_set = split_watched(bangumi_watch, ratio)
-        if len(train_set) == 0 or len(test_set) == 0:
+        train_set, test_set = split_dataset(bangumi_watch, ratio)
+        if train_set is None and test_set is None:
             continue
-        for train_item in train_set:
-            for bangumi_id in range(0, bangumi_count):
-                if bangumi_id != train_item:
-                    score[bangumi_id] += sim_bangumi[train_item, bangumi_id]
-        evl = evaluate_item_based(train_set, test_set, score)
-        print evl
-        result_list.append(evl)
-    overall = pd.Series(result_list)
-    print "Total: %f" % (overall.mean())
+        # build dataset
+        x_train = np.array(list(model.docvecs[str(id_bangumi_lookup[str(bangumi_id)])] for bangumi_id in train_set))
+        x_predict = np.array(list(model.docvecs[str(id_bangumi_lookup[str(bangumi_id)])] for bangumi_id in test_set))
+        y_train = np.array(list(bangumi_watch[watched_index] for watched_index in train_set))
+        y_predict = np.array(list(bangumi_watch[watched_index] for watched_index in test_set))
+        gnb = GaussianNB()
+        result = gnb.fit(x_train, y_train).predict(x_predict)
+        precision = precision_score(y_predict, result)
+        recall = recall_score(y_predict, result)
+        # total = x_predict.shape[0]
+        # miss = (y_predict != result).sum()
+
+        print "No.%d pre=%.2f rec=%.2f" % (index, precision, recall)
+        result_list.append((precision, recall))
+    overall = pd.DataFrame(result_list, columns=["Precision", "Recall"])
+    print "Avg precision: %.2f Avg recall: %.2f" % (overall["Precision"].mean(), overall["Recall"].mean())
+
+
+

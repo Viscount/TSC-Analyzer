@@ -18,6 +18,7 @@ class Bangumi(__BASE_MODEL):
     season_id = Column(Integer, primary_key=True)
     season_status = Column(Integer, nullable=True)
     title = Column(String(64), nullable=True)
+    introduction = Column(String(512), nullable=True)
     total_count = Column(Integer, nullable=True)
     update_time = Column(Integer, nullable=True)
     url = Column(Text, nullable=True)
