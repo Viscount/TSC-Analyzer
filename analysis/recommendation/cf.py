@@ -8,6 +8,7 @@ import pandas as pd
 import math
 import random
 from numpy import linalg
+from sklearn.metrics import precision_score, recall_score
 
 
 def get_senders(path, limit):
@@ -62,111 +63,73 @@ def sim(a, b):
     return cos
 
 
-def item_sim(a, b):
-    dim = a.shape[0]
-    a_rank = np.argsort(-a)
-    b_rank = np.argsort(-b)
-    a_user_set = set()
-    b_user_set = set()
-    for index in range(0, dim):
-        if a[a_rank[index]] > 0:
-            a_user_set.add(a_rank[index])
-        if b[b_rank[index]] > 0:
-            b_user_set.add(b_rank[index])
-        if a[a_rank[index]] == 0 and b[b_rank[index]] == 0:
-            break
-    if len(a_user_set) == 0 or len(b_user_set) == 0:
-        return 0
-    sim = len(a_user_set & b_user_set) * 1.0/math.sqrt(len(a_user_set)*len(b_user_set))
-    return sim
-
-
-def split_watched(watched, ratio):
-    rank = np.argsort(-watched)
+def split_dataset(watched_vector, ratio):
+    random.seed(123456789)
     watched_set = set()
-    for index in range(0, watched.shape[0]):
-        if watched[rank[index]] > 0:
-            watched_set.add(rank[index])
+    unwatched_set = set()
+    for index in range(0, watched_vector.shape[0]):
+        if watched_vector[index] > 0:
+            watched_set.add(index)
         else:
-            break
-    select_num = int(index * ratio)
-    test_num = index - select_num
-    select_set = set(random.sample(list(watched_set), select_num))
-    test_set = watched_set - select_set
-    return select_set, test_set
+            unwatched_set.add(index)
+    total_select_num = int(watched_vector.shape[0] * ratio)
+    watched_select_num = int(len(watched_set) * ratio)
+    if watched_select_num == len(watched_set) or watched_select_num == 0:
+        return None, None
+    watched_select = set(random.sample(list(watched_set), watched_select_num))
+    unwatched_select = set(random.sample(list(unwatched_set), total_select_num - watched_select_num))
+    train_set = watched_select | unwatched_select
+    test_set = (watched_set - watched_select) | (unwatched_set - unwatched_select)
+    return train_set, test_set
 
 
-def evaluate_user_based(standard, predict):
-    dim = standard.shape[0]
-    std_rank = np.argsort(-standard)
-    predict_rank = np.argsort(-predict)
-    std_result_set = set()
-    predict_set = set()
-    for index in range(0, dim):
-        if standard[std_rank[index]] == 0:
-            break
+def norm(score_array):
+    score_sum = np.max(score_array)
+    normlized = score_array / score_sum
+    for index in range(0, normlized.shape[0]):
+        if normlized[index] > 0.5:
+            normlized[index] = 1
         else:
-            std_result_set.add(std_rank[index])
-            predict_set.add(predict_rank[index])
-    return len(std_result_set & predict_set) * 1.0 / index
-
-
-def evaluate_item_based(train_set, test_set, score):
-    rank = np.argsort(-score)
-    recommend_set = set()
-    index = 0
-    while len(recommend_set) < len(test_set)+len(train_set):
-        if score[rank[index]] not in train_set:
-            recommend_set.add(rank[index])
-            index += 1
-    return len(test_set & recommend_set) * 1.0 / len(test_set)
+            normlized[index] = 0
+    return normlized
 
 
 if __name__ == "__main__":
-    # senders = get_senders("D:\\workspace\\TSC-Analyzer\\tmp\\senders.csv", 500)
-    # bangumis = get_bangumis()
-    # id_user_lookup, user_id_lookup = make_lookup(senders)
-    # id_bangumi_lookup, bangumi_id_lookup = make_lookup(bangumis)
-    # matrix = np.zeros((len(senders), len(bangumis)))
-    # for sender in senders:
-    #     sender_index = int(user_id_lookup[sender])
-    #     bangumis_set = get_sender_bangumi(sender)
-    #     for bangumi in bangumis_set:
-    #         bangumi_index = int(bangumi_id_lookup[bangumi])
-    #         matrix[sender_index][bangumi_index] = 1
-    # np.savetxt("matrix.txt", matrix, fmt="%d", delimiter=",")
 
     matrix = np.loadtxt("matrix.txt", delimiter=",")
     sender_count = matrix.shape[0]
     bangumi_count = matrix.shape[1]
     # user-based cf
-    # result_list = []
-    # for sender_index in range(0, sender_count):
-    #     standard = matrix[sender_index, :]
-    #     score = np.zeros(bangumi_count)
-    #     # 获取相邻用户
-    #     compare_user_set = set()
-    #     for bangumi_index in range(0, bangumi_count):
-    #         if standard[bangumi_index] == 1:
-    #             bangumi_watched = matrix[:, bangumi_index]
-    #             for user_index in range(0, sender_count):
-    #                 if bangumi_watched[user_index] == 1 & user_index != sender_index:
-    #                     compare_user_set.add(user_index)
-    #     # 计算推荐值
-    #     for user_index in compare_user_set:
-    #         user_array = matrix[user_index, :]
-    #         similarity = sim(standard, user_array)
-    #         for index in range(0, bangumi_count):
-    #             score[index] += user_array[index] * similarity
-    #     # 计算评估结果
-    #     evl = evaluate_user_based(standard, score)
-    #     print evl
-    #     result_list.append(evl)
-    # overall = pd.Series(result_list)
-    # print "Total: %f" % (overall.mean())
+    result_list = []
+    ratio = 0.8
+    for sender_index in range(0, sender_count):
+        bangumi_watched = matrix[sender_index, :]
+        train_set, test_set = split_dataset(bangumi_watched, ratio)
+        if train_set is None and test_set is None:
+            continue
+        x_train = np.array(list(bangumi_watched[bangumi_index] for bangumi_index in train_set))
+        x_predict = np.array(list(bangumi_watched[bangumi_index] for bangumi_index in test_set))
+        score = np.zeros(len(test_set))
+        for sender_compare in range(0, sender_count):
+            if sender_compare != sender_index:
+                comp_watched = matrix[sender_compare, :]
+                comp_train = np.array(list(comp_watched[bangumi_index] for bangumi_index in train_set))
+                similarity = sim(x_train, comp_train)
+                if similarity > 0:
+                    comp_predict = np.array(list(comp_watched[bangumi_index] for bangumi_index in test_set))
+                    score += similarity * comp_predict
+        result = norm(score)
+        precision = precision_score(x_predict, result)
+        recall = recall_score(x_predict, result)
+        print "No.%d pre=%.2f rec=%.2f" % (sender_index, precision, recall)
+        result_list.append((precision, recall))
+
+    overall = pd.DataFrame(result_list, columns=["Precision", "Recall"])
+    print "Avg precision: %.2f Avg recall: %.2f" % (overall["Precision"].mean(), overall["Recall"].mean())
+
 
     # item-based cf
-    sim_bangumi = np.zeros((bangumi_count, bangumi_count))
+    '''sim_bangumi = np.zeros((bangumi_count, bangumi_count))
     result_list = []
     for index in range(0, bangumi_count):
         for index_com in range(index, bangumi_count):
@@ -191,7 +154,7 @@ if __name__ == "__main__":
         print evl
         result_list.append(evl)
     overall = pd.Series(result_list)
-    print "Total: %f" % (overall.mean())
+    print "Total: %f" % (overall.mean())'''
 
 
 

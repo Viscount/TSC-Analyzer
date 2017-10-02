@@ -11,7 +11,7 @@ import multiprocessing
 from util import preprocess_util
 import logging
 from sklearn.naive_bayes import GaussianNB
-from sklearn import svm
+from sklearn import tree
 from sklearn.metrics import precision_score, recall_score
 
 logger = logging.getLogger("logger")
@@ -64,25 +64,35 @@ def get_sender_bangumi(sender_id):
 
 
 class TscTaggedDocument(object):
-    def __init__(self, bangumis):
-        self.bangumis = bangumis
+    def __init__(self, bangumi_dict):
+        self.bangumi_dict = bangumi_dict
 
     def __iter__(self):
-        for bangumi in self.bangumis:
-            intro_words = preprocess_util.word_segment(bangumi.introduction)
-            yield TaggedDocument(words=intro_words, tags=[str(bangumi.season_id)])
+        for bangumi in self.bangumi_dict.keys():
+            content_words = self.bangumi_dict[bangumi]
+            yield TaggedDocument(words=content_words, tags=[bangumi])
 
 
 def model_training():
     bangumis = bangumi_dao.find_all_bangumis()
-    tsc_docs = TscTaggedDocument(bangumis)
-    model = Doc2Vec(dm=0, dbow_words=1, size=200, window=8, min_count=1, iter=10, workers=multiprocessing.cpu_count())
+    bangumi_dict = dict()
+    for bangumi in bangumis:
+        print 'Collecting bangumi ' + str(bangumi.season_id)
+        words = []
+        episodes = episode_dao.find_episodes_by_bangumi(bangumi.season_id)
+        for episode in episodes:
+            danmakus = danmaku_dao.find_danmakus_by_episode(episode.episode_id)
+            for danmku in danmakus:
+                words.extend(preprocess_util.word_segment(danmku.content))
+        bangumi_dict[str(bangumi.season_id)] = words
+    tsc_docs = TscTaggedDocument(bangumi_dict)
+    model = Doc2Vec(dm=0, dbow_words=1, size=200, window=8, min_count=10, iter=10, workers=multiprocessing.cpu_count())
     print 'Building vocabulary......'
     model.build_vocab(tsc_docs)
     print 'Training doc2vec model......'
     model.train(tsc_docs, total_examples=model.corpus_count, epochs=model.iter)
     print 'Vocabulary size:', len(model.wv.vocab)
-    model.save("intro_doc2vec_200.model")
+    model.save("content_doc2vec_200.model")
 
 
 def split_dataset(watched_vector, ratio):
@@ -116,9 +126,9 @@ if __name__ == "__main__":
     matrix = np.loadtxt("matrix.txt", delimiter=",")
     sender_count = matrix.shape[0]
     bangumi_count = matrix.shape[1]
-    model = Doc2Vec.load("D:\\workspace\\TSC-Analyzer\\tmp\\models\\intro_doc2vec_200.model")
+    model = Doc2Vec.load("D:\\workspace\\TSC-Analyzer\\tmp\\models\\content_doc2vec_200.model")
 
-    # content-based
+    # tsc-based
     ratio = 0.8
     result_list = []
     for index in range(0, sender_count):
@@ -133,7 +143,8 @@ if __name__ == "__main__":
         y_train = np.array(list(bangumi_watch[watched_index] for watched_index in train_set))
         y_predict = np.array(list(bangumi_watch[watched_index] for watched_index in test_set))
         gnb = GaussianNB()
-        result = gnb.fit(x_train, y_train).predict(x_predict)
+        gnb = gnb.fit(x_train, y_train)
+        result = gnb.predict(x_predict)
         precision = precision_score(y_predict, result)
         recall = recall_score(y_predict, result)
         print "No.%d pre=%.2f rec=%.2f" % (index, precision, recall)

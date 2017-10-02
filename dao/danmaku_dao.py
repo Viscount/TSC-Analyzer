@@ -51,7 +51,7 @@ def find_danmaku(danmaku):
 def find_danmakus_by_episode(episode_id):
     session = DBUtil.open_session()
     try:
-        result = session.query(Danmaku).filter(Danmaku.episode_id == episode_id).all()
+        result = session.query(Danmaku).filter(Danmaku.episode_id == episode_id).order_by('playback_time').all()
         return result
     except Exception as e:
         print e
