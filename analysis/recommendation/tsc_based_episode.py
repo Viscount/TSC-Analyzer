@@ -10,8 +10,10 @@ from gensim.models.doc2vec import TaggedDocument, Doc2Vec
 import multiprocessing
 from util import preprocess_util
 import logging
-from sklearn.naive_bayes import GaussianNB
+from sklearn.naive_bayes import GaussianNB, BernoulliNB
+from sklearn import svm
 from sklearn import tree
+from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import precision_score, recall_score
 
 logger = logging.getLogger("logger")
@@ -82,7 +84,7 @@ class TscTaggedDocument(object):
 
 
 def split_dataset(watched_vector, ratio):
-    random.seed(123456789)
+    random.seed(987654321)
     watched_set = set()
     unwatched_set = set()
     for index in range(0, watched_vector.shape[0]):
@@ -102,14 +104,7 @@ def split_dataset(watched_vector, ratio):
 
 
 def make_episode_words(episode_id, model):
-    words = []
-    danmakus = danmaku_dao.find_danmakus_by_episode(episode_id)
-    for danmku in danmakus:
-        words.extend(preprocess_util.word_segment(danmku.content))
-    for word in words:
-        if word not in model.wv.vocab:
-            words.remove(word)
-    return model[words]
+    return model.docvecs[str(episode_id)]
 
 
 def model_training():
@@ -151,68 +146,73 @@ def transfer(origin_result, test_set, times_limit, lookup):
 
 
 if __name__ == "__main__":
-    model_training()
+    # model_training()
 
-    # senders = get_senders("D:\\workspace\\TSC-Analyzer\\tmp\\senders.csv", 500)
-    # bangumis = get_bangumis()
-    # episodes = get_episodes()
-    # id_user_lookup, user_id_lookup = make_lookup(senders)
-    # id_bangumi_lookup, bangumi_id_lookup = make_lookup(bangumis)
-    # id_episode_lookup, episode_id_lookup = make_lookup(episodes)
-    #
-    # matrix = np.loadtxt("matrix.txt", delimiter=",")
-    # matrix_epi = np.loadtxt("matrix_user2episode.txt", delimiter=",")
-    # sender_count = matrix.shape[0]
-    # bangumi_count = matrix.shape[1]
-    # episode_count = matrix_epi.shape[1]
-    # model = Doc2Vec.load("D:\\workspace\\TSC-Analyzer\\tmp\\models\\content_doc2vec_200.model")
-    #
+    senders = get_senders("D:\\workspace\\TSC-Analyzer\\tmp\\senders.csv", 500)
+    bangumis = get_bangumis()
+    episodes = get_episodes()
+    id_user_lookup, user_id_lookup = make_lookup(senders)
+    id_bangumi_lookup, bangumi_id_lookup = make_lookup(bangumis)
+    id_episode_lookup, episode_id_lookup = make_lookup(episodes)
+
+    matrix = np.loadtxt("matrix.txt", delimiter=",")
+    matrix_epi = np.loadtxt("matrix_user2episode.txt", delimiter=",")
+    sender_count = matrix.shape[0]
+    bangumi_count = matrix.shape[1]
+    episode_count = matrix_epi.shape[1]
+    model = Doc2Vec.load("D:\\workspace\\TSC-Analyzer\\tmp\\models\\episode_doc2vec_200.model")
+
     # # tsc-based
-    # ratio = 0.8
-    # result_list = []
-    # for index in range(0, sender_count):
-    #     bangumi_watch = matrix[index, :]
-    #     episode_watch = matrix_epi[index, :]
-    #     train_set, test_set = split_dataset(bangumi_watch, ratio)
-    #     if train_set is None and test_set is None:
-    #         continue
-    #     # build expand train_set
-    #     train_list = []
-    #     label_list = []
-    #     for bangumi in train_set:
-    #         season_id = str(id_bangumi_lookup[str(bangumi)])
-    #         episodes = episode_dao.find_episodes_by_bangumi(season_id)
-    #         for episode in episodes:
-    #             train_list.append(make_episode_words(episode.episode_id, model))
-    #             label_list.append(episode_watch[episode_id_lookup[str(episode.episode_id)]])
-    #     x_train = np.array(train_list)
-    #     y_train = np.array(label_list)
-    #
-    #     # build expand test_set
-    #     test_list = []
-    #     label_list = []
-    #     for bangumi in test_set:
-    #         season_id = str(id_bangumi_lookup[str(bangumi)])
-    #         episodes = episode_dao.find_episodes_by_bangumi(season_id)
-    #         for episode in episodes:
-    #             test_list.append(make_episode_words(episode.episode_id, model))
-    #             label_list.append(episode_watch[episode_id_lookup[str(episode.episode_id)]])
-    #     x_predict = np.array(test_list)
-    #     y_predict = np.array(label_list)
-    #     y_bangumi_predict = np.array(list(bangumi_watch[watched_index] for watched_index in test_set))
-    #
-    #     gnb = GaussianNB()
-    #     gnb = gnb.fit(x_train, y_train)
-    #     result = gnb.predict(x_predict)
-    #     bangumi_result = transfer(result, test_set, 1, id_bangumi_lookup)
-    #
-    #     precision = precision_score(y_bangumi_predict, bangumi_result)
-    #     recall = recall_score(y_bangumi_predict, bangumi_result)
-    #     print "No.%d pre=%.2f rec=%.2f" % (index, precision, recall)
-    #     result_list.append((precision, recall))
-    #
-    # overall = pd.DataFrame(result_list, columns=["Precision", "Recall"])
-    # print "Avg precision: %.2f Avg recall: %.2f" % (overall["Precision"].mean(), overall["Recall"].mean())
+    ratio = 0.8
+    result_list = []
+    for index in range(0, sender_count):
+        bangumi_watch = matrix[index, :]
+        episode_watch = matrix_epi[index, :]
+        train_set, test_set = split_dataset(bangumi_watch, ratio)
+        if train_set is None and test_set is None:
+            continue
+        # build expand train_set
+        train_list = []
+        label_list = []
+        for bangumi in train_set:
+            season_id = str(id_bangumi_lookup[str(bangumi)])
+            episodes = episode_dao.find_episodes_by_bangumi(season_id)
+            for episode in episodes:
+                train_list.append(make_episode_words(episode.episode_id, model))
+                label_list.append(episode_watch[int(episode_id_lookup[episode.episode_id])])
+        x_train = np.array(train_list)
+        y_train = np.array(label_list)
+
+        # build expand test_set
+        test_list = []
+        label_list = []
+        for bangumi in test_set:
+            season_id = str(id_bangumi_lookup[str(bangumi)])
+            episodes = episode_dao.find_episodes_by_bangumi(season_id)
+            for episode in episodes:
+                test_list.append(make_episode_words(episode.episode_id, model))
+                label_list.append(episode_watch[int(episode_id_lookup[episode.episode_id])])
+        x_predict = np.array(test_list)
+        y_predict = np.array(label_list)
+        y_bangumi_predict = np.array(list(bangumi_watch[watched_index] for watched_index in test_set))
+
+        gnb = MLPClassifier(solver='lbfgs', alpha=1e-5, hidden_layer_sizes=(256, 2), random_state=1)
+        # gnb = GaussianNB()
+        gnb = gnb.fit(x_train, y_train)
+        result = gnb.predict(x_predict)
+        bangumi_result = transfer(result, test_set, 1, id_bangumi_lookup)
+
+        precision = precision_score(y_bangumi_predict, bangumi_result)
+        recall = recall_score(y_bangumi_predict, bangumi_result)
+        unmatch = (y_bangumi_predict != bangumi_result).sum()
+        accuracy = 1 - (unmatch * 1.0 / bangumi_result.shape[0])
+        print "No.%d acc=%.2f pre=%.2f rec=%.2f" % (index, accuracy, precision, recall)
+        result_list.append((accuracy, precision, recall))
+
+    overall = pd.DataFrame(result_list, columns=["Accuracy", "Precision", "Recall"])
+    overall.to_csv("tsc-episode-mlp.csv", sep=",")
+    print "Avg accuracy: %.2f Avg precision: %.2f Avg recall: %.2f" % \
+          (overall["Accuracy"].mean(), overall["Precision"].mean(), overall["Recall"].mean())
 
 
 

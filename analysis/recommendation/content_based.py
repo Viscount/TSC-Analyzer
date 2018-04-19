@@ -11,6 +11,7 @@ import multiprocessing
 from util import preprocess_util
 import logging
 from sklearn.naive_bayes import GaussianNB
+from sklearn.neural_network import MLPClassifier
 from sklearn import svm
 from sklearn.metrics import precision_score, recall_score
 
@@ -132,15 +133,20 @@ if __name__ == "__main__":
         x_predict = np.array(list(model.docvecs[str(id_bangumi_lookup[str(bangumi_id)])] for bangumi_id in test_set))
         y_train = np.array(list(bangumi_watch[watched_index] for watched_index in train_set))
         y_predict = np.array(list(bangumi_watch[watched_index] for watched_index in test_set))
-        gnb = GaussianNB()
+        gnb = MLPClassifier(solver='lbfgs', alpha=1e-5, hidden_layer_sizes=(256, 2), random_state=1)
+        # gnb = GaussianNB()
         result = gnb.fit(x_train, y_train).predict(x_predict)
         precision = precision_score(y_predict, result)
         recall = recall_score(y_predict, result)
-        print "No.%d pre=%.2f rec=%.2f" % (index, precision, recall)
-        result_list.append((precision, recall))
+        unmatch = (y_predict != result).sum()
+        accuracy = 1 - (unmatch * 1.0 / result.shape[0])
+        print "No.%d acc=%.2f pre=%.2f rec=%.2f" % (index, accuracy, precision, recall)
+        result_list.append((accuracy, precision, recall))
 
-    overall = pd.DataFrame(result_list, columns=["Precision", "Recall"])
-    print "Avg precision: %.2f Avg recall: %.2f" % (overall["Precision"].mean(), overall["Recall"].mean())
+    overall = pd.DataFrame(result_list, columns=["Accuracy", "Precision", "Recall"])
+    overall.to_csv("content-mlp.csv", sep=",")
+    print "Avg accuracy: %.2f Avg precision: %.2f Avg recall: %.2f" % \
+          (overall["Accuracy"].mean(), overall["Precision"].mean(), overall["Recall"].mean())
 
 
 

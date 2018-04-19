@@ -67,8 +67,22 @@ def get_sender_episode(sender_id):
     return episode_id_set
 
 
+def get_sender_history_detail(sender_ids):
+    history = []
+    danmakus = danmaku_dao.find_danmakus_by_sender_ids(sender_ids)
+    episodes = episode_dao.find_all_episodes()
+    epi_bangumi_dict = dict()
+    for episode in episodes:
+        epi_bangumi_dict[episode.episode_id] = episode.season_id
+    for danmaku in danmakus:
+        item = [danmaku.sender_id, epi_bangumi_dict[danmaku.episode_id], danmaku.episode_id,
+                danmaku.raw_id, danmaku.unix_timestamp]
+        history.append(item)
+    return history
+
+
 if __name__ == "__main__":
-    senders = get_senders("D:\\workspace\\TSC-Analyzer\\tmp\\senders.csv", 500)
+    senders = get_senders("D:\\workspace\\TSC-Analyzer\\tmp\\senders.csv", 248)
     bangumis = get_bangumis()
     episodes = get_episodes()
     id_user_lookup, user_id_lookup = make_lookup(senders)
@@ -84,11 +98,18 @@ if __name__ == "__main__":
     #        matrix[sender_index][bangumi_index] = 1
     # np.savetxt("matrix_user2bangumi.txt", matrix, fmt="%d", delimiter=",")
 
-    matrix = np.zeros((len(senders), len(episodes)))
-    for sender in senders:
-        sender_index = int(user_id_lookup[sender])
-        episode_set = get_sender_episode(sender)
-        for episode in episode_set:
-            episode_index = int(episode_id_lookup[episode])
-            matrix[sender_index][episode_index] = 1
-    np.savetxt("matrix_user2episode.txt", matrix, fmt="%d", delimiter=",")
+    # matrix = np.zeros((len(senders), len(episodes)))
+    # for sender in senders:
+    #     sender_index = int(user_id_lookup[sender])
+    #     episode_set = get_sender_episode(sender)
+    #     for episode in episode_set:
+    #         episode_index = int(episode_id_lookup[episode])
+    #         matrix[sender_index][episode_index] = 1
+    # np.savetxt("matrix_user2episode.txt", matrix, fmt="%d", delimiter=",")
+
+    with open("D:\\workspace\\TSC-Analyzer\\tmp\\sender_his.csv", 'wb') as f:
+        writer = csv.writer(f, dialect='excel', delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
+        writer.writerow(["sender_id", "seanson_id", "episode_id", "tsc_raw_id", "post_time"])
+        history = get_sender_history_detail(senders)
+        for item in history:
+            writer.writerow(item)

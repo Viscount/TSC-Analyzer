@@ -74,6 +74,19 @@ def find_danmakus_by_sender_id(sender_id):
         DBUtil.close_session(session)
 
 
+def find_danmakus_by_sender_ids(sender_ids):
+    session = DBUtil.open_session()
+    try:
+        result = session.query(Danmaku).filter(Danmaku.sender_id.in_(sender_ids)).all()
+        return result
+    except Exception as e:
+        print e
+        session.rollback()
+        return None
+    finally:
+        DBUtil.close_session(session)
+
+
 def find_all_senders():
     session = DBUtil.open_session()
     try:

@@ -64,7 +64,7 @@ def sim(a, b):
 
 
 def split_dataset(watched_vector, ratio):
-    random.seed(123456789)
+    random.seed(987654321)
     watched_set = set()
     unwatched_set = set()
     for index in range(0, watched_vector.shape[0]):
@@ -121,40 +121,18 @@ if __name__ == "__main__":
         result = norm(score)
         precision = precision_score(x_predict, result)
         recall = recall_score(x_predict, result)
-        print "No.%d pre=%.2f rec=%.2f" % (sender_index, precision, recall)
-        result_list.append((precision, recall))
+        unmatch = (x_predict != result).sum()
+        accuracy = 1 - (unmatch * 1.0 / result.shape[0])
+        print "No.%d acc=%.2f pre=%.2f rec=%.2f" % (sender_index, accuracy, precision, recall)
+        result_list.append((accuracy, precision, recall))
 
-    overall = pd.DataFrame(result_list, columns=["Precision", "Recall"])
-    print "Avg precision: %.2f Avg recall: %.2f" % (overall["Precision"].mean(), overall["Recall"].mean())
+    overall = pd.DataFrame(result_list, columns=["Accuracy", "Precision", "Recall"])
+    overall.to_csv("cf.csv", sep=",")
+    print "Avg accuracy: %.2f Avg precision: %.2f Avg recall: %.2f" % \
+          (overall["Accuracy"].mean(), overall["Precision"].mean(), overall["Recall"].mean())
 
 
-    # item-based cf
-    '''sim_bangumi = np.zeros((bangumi_count, bangumi_count))
-    result_list = []
-    for index in range(0, bangumi_count):
-        for index_com in range(index, bangumi_count):
-            if index == index_com:
-                sim_bangumi[index, index_com] = 1.0
-            else:
-                similarity = item_sim(matrix[:, index], matrix[:, index_com])
-                sim_bangumi[index, index_com] = similarity
-                sim_bangumi[index_com, index] = similarity
-    ratio = 0.8
-    for index in range(0, sender_count):
-        bangumi_watch = matrix[index, :]
-        score = np.zeros(bangumi_count)
-        train_set, test_set = split_watched(bangumi_watch, ratio)
-        if len(train_set) == 0 or len(test_set) == 0:
-            continue
-        for train_item in train_set:
-            for bangumi_id in range(0, bangumi_count):
-                if bangumi_id != train_item:
-                    score[bangumi_id] += sim_bangumi[train_item, bangumi_id]
-        evl = evaluate_item_based(train_set, test_set, score)
-        print evl
-        result_list.append(evl)
-    overall = pd.Series(result_list)
-    print "Total: %f" % (overall.mean())'''
+
 
 
 
